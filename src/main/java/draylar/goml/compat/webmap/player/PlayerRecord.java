@@ -95,48 +95,59 @@ public class PlayerRecord {
     /**
      * Resolves the player's name and icon using Minecraft API. Has no effect if not constructed with player UUID (i.e with PolymerHeadBlock).
      */
-    public void resolvePlayer() {
-        if(this.uuid != null) {
-            mainTry:
-            try {
-                // Check cache first
-                String json = PlayerRecordCache.getProfile(this.uuid);
+	public void resolvePlayer() {
+	    if (this.uuid != null) {
+	        mainTry:
+	        try {
+	            // Check cache first
+	            String json = PlayerRecordCache.getProfile(this.uuid);
+	            // On cache miss
+	            if (json == null) {
+	                json = openConnection(URI.create(PROFILE_LOOKUP_URL + this.uuid));
+	                PlayerRecordCache.putProfile(this.uuid, json);
+	            }
+	           
+	            Gson gson = new Gson();
+	            Map<String, Object> profile = gson.fromJson(json, new TypeToken<Map<String, Object>>(){}.getType());
+	            if (profile == null) {
+	                break mainTry;
+	            }
+	            // Extract player data
+	            this.name = (String) profile.get("name");
+	
+	            @SuppressWarnings("unchecked")
+	            List<Map<String, Object>> properties = (List<Map<String, Object>>) profile.get("properties");
+	            if (properties != null) {
+	                for (Map<String, Object> property : properties) {
+	                    if ("textures".equals(property.get("name"))) {
+	                        this.playerIcon = new PlayerHeadIcon(getHeadImage((String) property.get("value")).orElse(null));
+	                        break;
+	                    }
+	                }
+	            }
 
-                // On cache miss
-                if (json == null) {
-                    json = openConnection(URI.create(PROFILE_LOOKUP_URL + this.uuid));
-                    PlayerRecordCache.putProfile(this.uuid, json);
-                }
-                
-                Gson gson = new Gson();
-                Map<String, Object> profile = gson.fromJson(json, new TypeToken<Map<String, Object>>(){}.getType());
-
-                if (profile == null) {
-                    break mainTry;
-                }
-
-                // Extract player data and create icon
-                this.name = (String) profile.get("name");
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> properties = (List<Map<String, Object>>) profile.get("properties");
-                if (properties != null) {
-                    for (Map<String, Object> property : properties) {
-                        if ("textures".equals(property.get("name"))) {
-                            this.playerIcon = new PlayerHeadIcon(getHeadImage((String) property.get("value")).orElse(null));
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception exception) {
-                GetOffMyLawn.LOGGER.warn("Unable to get data for player with UUID {}: ", this.uuid, exception);
-            }
-
-            // If name is still null, attempt to retrieve it from UserCache
-            server.services().nameToIdCache().get(uuid).ifPresent(
-                profile -> this.name = profile.name()
-            );
-        }
-    }
+				// If icon is still null, pass back to constructer to give it a default one.
+	            if (this.playerIcon == null) {
+	                this.playerIcon = new PlayerHeadIcon(null);
+	                GetOffMyLawn.LOGGER.info("Using default head icon for UUID {} (no textures or fetch issue)", this.uuid);
+	            }
+	
+	        } catch (Exception exception) {
+	            GetOffMyLawn.LOGGER.warn("Unable to get data for player with UUID {}: ", this.uuid, exception);
+	        }
+	
+	        // If name is still null, attempt to retrieve it from UserCache
+	        server.services().nameToIdCache().get(uuid).ifPresent(
+	            profile -> this.name = profile.name()
+	        );
+	
+	        // extra safety net if everything failed
+	        if (this.playerIcon == null) {
+	            this.playerIcon = new PlayerHeadIcon(null);
+	            GetOffMyLawn.LOGGER.warn("Emergency default icon fallback for UUID {} after full failure", this.uuid);
+	        }
+	    }
+	}
 
 	private static Optional<String> getHeadImage(@Nullable String skinData) {
 		if (skinData == null || skinData.isBlank()) {
